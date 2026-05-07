@@ -104,7 +104,7 @@ class LogicAnalyzerWindow(QMainWindow):
         for i in range(channels):
             # Create step plot for each channel
             # We assign distinct colors to channels for a nice UI
-            color = pg.intColor(i, hues=channels, values=1, maxValue=255, minHue=0, maxHue=255, sat=200, light=150)
+            color = pg.intColor(i, hues=channels, values=1, maxValue=255, minHue=0, maxHue=255, sat=200)
             pen = pg.mkPen(color=color, width=2)
             curve = pg.PlotCurveItem(pen=pen, stepMode="right")
             self.plot_widget.addItem(curve)
