@@ -32,9 +32,14 @@ class LogicAnalyzerWindow(QMainWindow):
         self.toolbar_layout.addWidget(self.port_combo)
 
         # Refresh Ports Button
-        self.btn_refresh = QPushButton("Refresh")
+        self.btn_refresh = QPushButton("Refresh Ports")
         self.btn_refresh.clicked.connect(self.refresh_ports)
         self.toolbar_layout.addWidget(self.btn_refresh)
+        
+        # Clear Plot Button
+        self.btn_clear = QPushButton("Clear View")
+        self.btn_clear.clicked.connect(self.clear_plot_data)
+        self.toolbar_layout.addWidget(self.btn_clear)
 
         # Baudrate Selection
         self.baud_combo = QComboBox()
@@ -72,6 +77,7 @@ class LogicAnalyzerWindow(QMainWindow):
         self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
         self.plot_widget.setLabel('bottom', "Time / Samples")
         self.plot_widget.setLabel('left', "Channels")
+        self.plot_widget.setLimits(xMin=-1)
         
         # Internal state
         self.is_capturing = False
@@ -94,19 +100,37 @@ class LogicAnalyzerWindow(QMainWindow):
         ports = [port.device for port in list_ports.comports()]
         self.port_combo.addItems(ports)
 
+    def clear_plot_data(self):
+        channels = self.channels_spin.value()
+        self.channel_data = [np.array([], dtype=np.int8) for _ in range(channels)]
+        self.time_data = np.array([], dtype=np.uint32)
+        self.sample_count = 0
+        if not self.is_capturing:
+            self.init_plot()
+
     def init_plot(self):
         self.plot_widget.clear()
         self.plot_curves = []
         channels = self.channels_spin.value()
         
+        # Define some bright colors for the channels
+        COLORS = [
+            (0, 255, 255),   # Cyan
+            (255, 0, 255),   # Magenta
+            (255, 255, 0),   # Yellow
+            (0, 255, 0),     # Green
+            (255, 100, 100), # Red
+            (100, 150, 255), # Blue
+            (255, 165, 0),   # Orange
+            (200, 200, 200), # White
+        ]
+        
         # Create Y-axis custom ticks
         ticks = []
         for i in range(channels):
-            # Create step plot for each channel
-            # We assign distinct colors to channels for a nice UI
-            color = pg.intColor(i, hues=channels, values=1, maxValue=255, minHue=0, maxHue=255, sat=200)
+            color = COLORS[i % len(COLORS)]
             pen = pg.mkPen(color=color, width=2)
-            curve = pg.PlotCurveItem(pen=pen, stepMode="right")
+            curve = pg.PlotCurveItem(pen=pen)
             self.plot_widget.addItem(curve)
             self.plot_curves.append(curve)
             ticks.append((i * 2 + 0.5, f"CH {i}"))
@@ -141,6 +165,7 @@ class LogicAnalyzerWindow(QMainWindow):
         self.baud_combo.setEnabled(False)
         self.format_combo.setEnabled(False)
         self.channels_spin.setEnabled(False)
+        self.btn_refresh.setEnabled(False)
 
         # Setup Worker
         port = self.port_combo.currentText()
@@ -172,6 +197,7 @@ class LogicAnalyzerWindow(QMainWindow):
         self.baud_combo.setEnabled(True)
         self.format_combo.setEnabled(True)
         self.channels_spin.setEnabled(True)
+        self.btn_refresh.setEnabled(True)
 
     def process_raw_data(self, raw_bytes):
         samples = self.parser.parse(raw_bytes)
@@ -197,12 +223,16 @@ class LogicAnalyzerWindow(QMainWindow):
         start_idx = max(0, self.sample_count - max_points)
         
         t = self.time_data[start_idx:]
-        
-        # stepMode requires len(x) == len(y) + 1
-        x_step = np.concatenate([t, [t[-1] + 1]])
+        if len(t) == 0:
+            return
+            
+        # Manual step mode conversion to avoid pyqtgraph stepMode shape bugs
+        x_step = np.empty(2 * len(t), dtype=t.dtype)
+        x_step[0::2] = t
+        x_step[1::2] = t + 1
         
         for i, curve in enumerate(self.plot_curves):
             y = self.channel_data[i][start_idx:]
-            # offset y so channels stack vertically
+            y_step = np.repeat(y, 2)
             y_offset = i * 2
-            curve.setData(x_step, y + y_offset)
+            curve.setData(x_step, y_step + y_offset)
