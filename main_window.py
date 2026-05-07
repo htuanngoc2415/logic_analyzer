@@ -9,6 +9,8 @@ from serial.tools import list_ports
 from data_parser import DataParser
 from serial_worker import SerialWorker
 from mock_device import MockWorker
+from decoders import UARTDecoder, SPIDecoder
+from decoder_dialog import DecoderDialog
 
 class LogicAnalyzerWindow(QMainWindow):
     def __init__(self):
@@ -40,6 +42,11 @@ class LogicAnalyzerWindow(QMainWindow):
         self.btn_clear = QPushButton("Clear View")
         self.btn_clear.clicked.connect(self.clear_plot_data)
         self.toolbar_layout.addWidget(self.btn_clear)
+
+        # Decode Button
+        self.btn_decode = QPushButton("Run Decoder")
+        self.btn_decode.clicked.connect(self.open_decoder_dialog)
+        self.toolbar_layout.addWidget(self.btn_decode)
 
         # Baudrate Selection
         self.baud_combo = QComboBox()
@@ -105,8 +112,76 @@ class LogicAnalyzerWindow(QMainWindow):
         self.channel_data = [np.array([], dtype=np.int8) for _ in range(channels)]
         self.time_data = np.array([], dtype=np.uint32)
         self.sample_count = 0
+        if hasattr(self, 'decoder_items'):
+            for item in self.decoder_items:
+                self.plot_widget.removeItem(item)
+            self.decoder_items = []
         if not self.is_capturing:
             self.init_plot()
+
+    def open_decoder_dialog(self):
+        if self.sample_count == 0:
+            return
+            
+        dialog = DecoderDialog(self.channels_spin.value(), self)
+        if dialog.exec():
+            config = dialog.get_config()
+            self.apply_decoder(config)
+            
+    def apply_decoder(self, config):
+        if hasattr(self, 'decoder_items'):
+            for item in self.decoder_items:
+                self.plot_widget.removeItem(item)
+        self.decoder_items = []
+        
+        if config['protocol'] == 'UART':
+            ch = config['channel']
+            samples_per_bit = config['sample_rate'] / config['baudrate']
+            decoder = UARTDecoder(samples_per_bit)
+            
+            data = self.channel_data[ch]
+            results = decoder.decode(data)
+            
+            y_offset = ch * 2 + 1.2
+            for res in results:
+                mid_idx = int((res['start'] + res['end']) / 2)
+                if mid_idx >= len(self.time_data): continue
+                mid_x = self.time_data[mid_idx]
+                
+                text = pg.TextItem(res['char'], color=(255, 255, 255), anchor=(0.5, 1))
+                text.setPos(mid_x, y_offset)
+                self.plot_widget.addItem(text)
+                self.decoder_items.append(text)
+                
+        elif config['protocol'] == 'SPI':
+            sck_ch = config['sck']
+            if sck_ch < 0:
+                return
+            sck = self.channel_data[sck_ch]
+            mosi = self.channel_data[config['mosi']] if config['mosi'] >= 0 else None
+            miso = self.channel_data[config['miso']] if config['miso'] >= 0 else None
+            cs = self.channel_data[config['cs']] if config['cs'] >= 0 else None
+            
+            decoder = SPIDecoder()
+            results = decoder.decode(sck, mosi, miso, cs)
+            
+            for res in results:
+                mid_idx = int((res['start'] + res['end']) / 2)
+                if mid_idx >= len(self.time_data): continue
+                mid_x = self.time_data[mid_idx]
+                
+                if config['mosi'] >= 0:
+                    y_off = config['mosi'] * 2 + 1.2
+                    text = pg.TextItem(res['mosi'], color=(255, 255, 255), anchor=(0.5, 1))
+                    text.setPos(mid_x, y_off)
+                    self.plot_widget.addItem(text)
+                    self.decoder_items.append(text)
+                if config['miso'] >= 0:
+                    y_off = config['miso'] * 2 + 1.2
+                    text = pg.TextItem(res['miso'], color=(255, 255, 255), anchor=(0.5, 1))
+                    text.setPos(mid_x, y_off)
+                    self.plot_widget.addItem(text)
+                    self.decoder_items.append(text)
 
     def init_plot(self):
         self.plot_widget.clear()
