@@ -1,93 +1,124 @@
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QComboBox, QSpinBox, QLineEdit, QPushButton, QWidget)
+from PyQt6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
 
 class DecoderDialog(QDialog):
-    def __init__(self, channels, parent=None):
+    def __init__(self, channels, sample_rate, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Protocol Decoder")
+        self.setWindowTitle("Run Decoder")
         self.channels = channels
-        self.layout = QVBoxLayout(self)
-        
-        # Protocol selection
-        self.proto_layout = QHBoxLayout()
-        self.proto_layout.addWidget(QLabel("Protocol:"))
-        self.proto_combo = QComboBox()
-        self.proto_combo.addItems(["UART", "SPI"])
-        self.proto_combo.currentIndexChanged.connect(self.update_ui)
-        self.proto_layout.addWidget(self.proto_combo)
-        self.layout.addLayout(self.proto_layout)
-        
-        # UART config
-        self.uart_widget = QWidget()
-        self.uart_layout = QVBoxLayout(self.uart_widget)
-        
-        ch_layout = QHBoxLayout()
-        ch_layout.addWidget(QLabel("RX Channel:"))
-        self.uart_ch = QComboBox()
-        self.uart_ch.addItems([f"CH {i}" for i in range(channels)])
-        ch_layout.addWidget(self.uart_ch)
-        self.uart_layout.addLayout(ch_layout)
-        
-        baud_layout = QHBoxLayout()
-        baud_layout.addWidget(QLabel("Baudrate:"))
-        self.baud_input = QLineEdit("115200")
-        baud_layout.addWidget(self.baud_input)
-        
-        baud_layout.addWidget(QLabel("Sample Rate (Hz):"))
-        self.sample_input = QLineEdit("1000000")
-        baud_layout.addWidget(self.sample_input)
-        self.uart_layout.addLayout(baud_layout)
-        
-        self.layout.addWidget(self.uart_widget)
-        
-        # SPI config
-        self.spi_widget = QWidget()
-        self.spi_layout = QVBoxLayout(self.spi_widget)
-        
-        for name in ["SCK", "MOSI", "MISO", "CS"]:
-            l = QHBoxLayout()
-            l.addWidget(QLabel(f"{name} Channel:"))
-            cb = QComboBox()
-            cb.addItem("None")
-            cb.addItems([f"CH {i}" for i in range(channels)])
-            setattr(self, f"spi_{name.lower()}", cb)
-            l.addWidget(cb)
-            self.spi_layout.addLayout(l)
-            
-        self.layout.addWidget(self.spi_widget)
-        
-        # Buttons
-        btn_layout = QHBoxLayout()
-        self.btn_decode = QPushButton("Decode")
-        self.btn_decode.clicked.connect(self.accept)
-        btn_layout.addWidget(self.btn_decode)
-        self.layout.addLayout(btn_layout)
-        
-        self.update_ui()
-        
-    def update_ui(self):
-        proto = self.proto_combo.currentText()
-        if proto == "UART":
-            self.uart_widget.setVisible(True)
-            self.spi_widget.setVisible(False)
-        else:
-            self.uart_widget.setVisible(False)
-            self.spi_widget.setVisible(True)
+        self.sample_rate = sample_rate
+
+        layout = QVBoxLayout(self)
+        protocol_row = QHBoxLayout()
+        protocol_row.addWidget(QLabel("Protocol:"))
+        self.protocol_combo = QComboBox()
+        self.protocol_combo.addItems(["UART", "I2C", "SPI", "1-Wire"])
+        self.protocol_combo.currentIndexChanged.connect(self._show_protocol_page)
+        protocol_row.addWidget(self.protocol_combo)
+        layout.addLayout(protocol_row)
+
+        self.pages = QStackedWidget()
+        self.pages.addWidget(self._build_uart_page())
+        self.pages.addWidget(self._build_i2c_page())
+        self.pages.addWidget(self._build_spi_page())
+        self.pages.addWidget(self._build_onewire_page())
+        layout.addWidget(self.pages)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        run_button = QPushButton("Run")
+        run_button.clicked.connect(self.accept)
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        buttons.addWidget(cancel_button)
+        buttons.addWidget(run_button)
+        layout.addLayout(buttons)
+
+    def _channel_spin(self, value=0):
+        spin = QSpinBox()
+        spin.setRange(0, self.channels - 1)
+        spin.setValue(min(value, self.channels - 1))
+        spin.setPrefix("CH")
+        return spin
+
+    def _build_uart_page(self):
+        page = QWidget()
+        form = QFormLayout(page)
+        self.uart_channel = self._channel_spin(0)
+        self.uart_baud = QLineEdit("115200")
+        form.addRow("RX:", self.uart_channel)
+        form.addRow("Baud:", self.uart_baud)
+        form.addRow("Sample rate:", QLabel(f"{self.sample_rate} Hz"))
+        return page
+
+    def _build_i2c_page(self):
+        page = QWidget()
+        form = QFormLayout(page)
+        self.i2c_sda = self._channel_spin(0)
+        self.i2c_scl = self._channel_spin(1)
+        form.addRow("SDA:", self.i2c_sda)
+        form.addRow("SCL:", self.i2c_scl)
+        return page
+
+    def _build_spi_page(self):
+        page = QWidget()
+        form = QFormLayout(page)
+        self.spi_sck = self._channel_spin(0)
+        self.spi_mosi = self._channel_spin(1)
+        self.spi_miso = self._channel_spin(2)
+        self.spi_cs = self._channel_spin(3)
+        self.spi_mode = QSpinBox()
+        self.spi_mode.setRange(0, 3)
+        form.addRow("SCK:", self.spi_sck)
+        form.addRow("MOSI:", self.spi_mosi)
+        form.addRow("MISO:", self.spi_miso)
+        form.addRow("CS:", self.spi_cs)
+        form.addRow("Mode:", self.spi_mode)
+        return page
+
+    def _build_onewire_page(self):
+        page = QWidget()
+        form = QFormLayout(page)
+        self.onewire_dq = self._channel_spin(0)
+        form.addRow("DQ:", self.onewire_dq)
+        return page
+
+    def _show_protocol_page(self, index):
+        self.pages.setCurrentIndex(index)
 
     def get_config(self):
-        proto = self.proto_combo.currentText()
-        if proto == "UART":
+        protocol = self.protocol_combo.currentText()
+        if protocol == "UART":
             return {
                 "protocol": "UART",
-                "channel": self.uart_ch.currentIndex(),
-                "baudrate": int(self.baud_input.text()),
-                "sample_rate": int(self.sample_input.text())
+                "channel": self.uart_channel.value(),
+                "baudrate": int(self.uart_baud.text()),
             }
-        else:
+        if protocol == "I2C":
+            return {
+                "protocol": "I2C",
+                "sda": self.i2c_sda.value(),
+                "scl": self.i2c_scl.value(),
+            }
+        if protocol == "SPI":
             return {
                 "protocol": "SPI",
-                "sck": self.spi_sck.currentIndex() - 1,
-                "mosi": self.spi_mosi.currentIndex() - 1,
-                "miso": self.spi_miso.currentIndex() - 1,
-                "cs": self.spi_cs.currentIndex() - 1
+                "sck": self.spi_sck.value(),
+                "mosi": self.spi_mosi.value(),
+                "miso": self.spi_miso.value(),
+                "cs": self.spi_cs.value(),
+                "mode": self.spi_mode.value(),
             }
+        return {"protocol": "1-Wire", "dq": self.onewire_dq.value()}
